@@ -14,175 +14,22 @@
  */
 
 var path = require('path');
-var url = require('url');
 var express = require('express');
-var minimist = require('minimist');
 var ws = require('ws');
 var kurento = require('kurento-client');
-
 var net = require('net');
 
-// opens a tcp connection and sends an RTSP DESCRIBE request to see if the stream is available
-var probe_rtsp_source = function(addr, port, key, callback){
-	const addr_byte = Buffer.from('rtsp://' + addr + ':' + port + '/' + key, 'utf8').toString('hex');
-	var rtsp_desc_byte = "444553435249424520" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP DESCRIBE request field
-	//var rtsp_setup_byte = "534554555020" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP SETUP request field
-	var rtsp_describe_raw_hex = Buffer.from(rtsp_desc_byte, 'hex');
-	//var rtsp_setup_raw_hex = Buffer.from(rtsp_setup_byte, 'hex');	
-	var tcp_probe = new net.Socket();
-	tcp_probe.on('connect', () => 
-		tcp_probe.write(rtsp_describe_raw_hex));
-		
-	tcp_probe.on('error', (err) => {
-		callback(false);
-		tcp_probe.destroy();
-	});
-	tcp_probe.on('data', (ans) => {
-		var ans_str = ans.toString();
-		var rtsp_code = ans_str.split('\n')[0].split(' ')[1];
-		callback(rtsp_code === "200");
-		tcp_probe.destroy();
-		
-	})
-	tcp_probe.connect(port,addr);
-}
 
-
-//probe_rtsp_source('127.0.0.1',8554,'vlc', function(ans) {});
-
-var argv = minimist(process.argv.slice(2), {
-    default: {
-        as_uri: 'http://localhost:8080/',
-        ws_uri: 'ws://localhost:8888/kurento'
-    }
-});
 
 var app = express();
 
 /*
  * Definition of global variables.
  */
-var idCounter = 0;
-var candidatesQueue = [];
 var kurentoClient = null;
-var viewer;
-
-/*
- * Server startup
- */
-var asUrl = url.parse(argv.as_uri);
-var port = asUrl.port;
-var server = app.listen(port, function() {
-});
-
-var wss = new ws.Server({
-    server : server,
-    path : '/one2many'
-});
-
-function nextUniqueId() {
-	idCounter++;
-	return idCounter.toString();
-}
-
-/*
- * Management of WebSocket messages
- */
-wss.on('connection', function(ws) {
-
-	var sessionId = nextUniqueId();
-	console.log('[' + new Date().toISOString().substring(0,19) + '] NEW CONNECTION ID ' + sessionId);
-
-    ws.on('error', function(error) {
-        console.log('[' + new Date().toISOString().substring(0,19) + ']  CONNECTION ' + sessionId + ' ERROR');
-        stop();
-    });
-
-    ws.on('close', function() {
-        console.log('[' + new Date().toISOString().substring(0,19) + '] CONNECTION ' + sessionId + ' CLOSED');
-        stop();
-    });
-
-    ws.on('message', function(_message) {
-        var message = JSON.parse(_message);
-        console.log('[' + new Date().toISOString().substring(0,19) + '] MESSAGE FROM CONNECTION ' + sessionId + ': ', message.id);
-        switch (message.id) {
-        case 'start':
-			init_sources();	
-		/*startPresenter(sessionId, ws, message.sdpOffer, function(error, sdpAnswer) {
-				if (error) {
-					return ws.send(JSON.stringify({
-						id : 'presenterResponse',
-						response : 'rejected',
-						message : error
-					}));
-				}
-				ws.send(JSON.stringify({
-					id : 'presenterResponse',
-					response : 'accepted',
-					sdpAnswer : sdpAnswer
-				}));
-			});*/
-			break;
-
-        case 'viewer':
-			startViewer(sessionId, ws, message.sdpOffer, function(error, sdpAnswer) {
-				if (error) {
-					return ws.send(JSON.stringify({
-						id : 'viewerResponse',
-						response : 'rejected',
-						message : error
-					}));
-				}
-
-				ws.send(JSON.stringify({
-					id : 'viewerResponse',
-					response : 'accepted',
-					sdpAnswer : sdpAnswer
-				}));
-			});
-			break;
-
-        case 'stop':
-            stop();
-            break;
-
-        case 'onIceCandidate':
-            onIceCandidate(sessionId, message.candidate);
-            break;
-
-        default:
-            ws.send(JSON.stringify({
-                id : 'error',
-                message : 'Invalid message ' + message
-            }));
-            break;
-        }
-    });
-});
-
-/*
- * Definition of functions
- */
-
-// Recover kurentoClient for the first time.
-function getKurentoClient(callback) {
-    if (kurentoClient !== null) {
-        return callback(null, kurentoClient);
-    }
-
-    kurento(argv.ws_uri, function(error, _kurentoClient) {
-        if (error) {
-            console.log("Could not find media server at address " + argv.ws_uri);
-            return callback("Could not find media server at address" + argv.ws_uri
-                    + ". Exiting with error " + error);
-        }
-
-        kurentoClient = _kurentoClient;
-        callback(null, kurentoClient);
-    });
-}
-
+const SERVER_URI = 'http:/localhost:8080/';
+const SERVER_TEST_PORT = 8080;
+const KMS_URI = 'ws://localhost:8888/kurento';
 
 const STATUS = {
 	FAILURE: 'FAILURE',
@@ -215,7 +62,38 @@ var rtsp_sources = [
 		key: 'mobile',
 		status: STATUS.CLOSED
 	}
-]
+];
+
+
+/*
+ * Server startup
+ */
+
+var server = app.listen(SERVER_TEST_PORT, function() {
+});
+
+
+/*
+ * Definition of functions
+ */
+
+// Recover kurentoClient for the first time.
+function getKurentoClient(callback) {
+    if (kurentoClient !== null) {
+        return callback(null, kurentoClient);
+    }
+
+    kurento(KMS_URI, function(error, _kurentoClient) {
+        if (error) {
+            console.log("Could not find media server at address " + KMS_URI);
+            return callback("Could not find media server at address" + KMS_URI
+                    + ". Exiting with error " + error);
+        }
+
+        kurentoClient = _kurentoClient;
+        callback(null, kurentoClient);
+    });
+}
 
 function init_sources(){
 	console.log('[' + new Date().toISOString().substring(0,19) + '] INITIALIZING SOURCE LIST, ' + rtsp_sources.length + ' ITEMS');
@@ -309,7 +187,7 @@ function openRTSPsource(source){
 										});
 										break;
 									case 'ice_candidate':
-										onIceCandidate(message.candidate);
+								//		onIceCandidate(message.candidate);
 										break;
 									case 'stop':
 									console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
@@ -326,7 +204,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + argv.as_uri + '' + key);
+					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + SERVER_URI + '' + key);
 					return true;
 				});
 
@@ -378,22 +256,13 @@ function closeRTSPsource(source) {
 }
 
 function startViewer(source, ws, sdpOffer, callback) {
-	clearCandidatesQueue();
 
 	source.pipeline.create('WebRtcEndpoint', function(error, webRtcEndpoint) {
 		if (error) {
 			stop();
 			return callback(error);
 		}
-		viewer = {
-			"webRtcEndpoint" : webRtcEndpoint,
-			"ws" : ws
-		}
 
-			while(candidatesQueue.length) {
-				var candidate = candidatesQueue.shift();
-				webRtcEndpoint.addIceCandidate(candidate);
-			}
 		
         webRtcEndpoint.on('OnIceCandidate', function(event) {
             var candidate = kurento.register.complexTypes.IceCandidate(event.candidate);
@@ -427,28 +296,38 @@ function startViewer(source, ws, sdpOffer, callback) {
 	});
 }
 
-function clearCandidatesQueue() {
-		delete candidatesQueue;
-}
-
 function stop() {
 	rtsp_sources.forEach(closeRTSPsource);
 }
 
-function onIceCandidate(_candidate) {
-    var candidate = kurento.register.complexTypes.IceCandidate(_candidate);
-
-    
-    if (viewer && viewer.webRtcEndpoint) {
-        viewer.webRtcEndpoint.addIceCandidate(candidate);
-    }
-    else {
-        if (!candidatesQueue) {
-            candidatesQueue = [];
-        }
-        candidatesQueue.push(candidate);
-    }
+// opens a tcp connection and sends an RTSP DESCRIBE request to see if the stream is available
+var probe_rtsp_source = function(addr, port, key, callback){
+	const addr_byte = Buffer.from('rtsp://' + addr + ':' + port + '/' + key, 'utf8').toString('hex');
+	var rtsp_desc_byte = "444553435249424520" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP DESCRIBE request field
+	//var rtsp_setup_byte = "534554555020" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP SETUP request field
+	var rtsp_describe_raw_hex = Buffer.from(rtsp_desc_byte, 'hex');
+	//var rtsp_setup_raw_hex = Buffer.from(rtsp_setup_byte, 'hex');	
+	var tcp_probe = new net.Socket();
+	tcp_probe.on('connect', () => 
+		tcp_probe.write(rtsp_describe_raw_hex));
+		
+	tcp_probe.on('error', (err) => {
+		callback(false);
+		tcp_probe.destroy();
+	});
+	tcp_probe.on('data', (ans) => {
+		var ans_str = ans.toString();
+		var rtsp_code = ans_str.split('\n')[0].split(' ')[1];
+		callback(rtsp_code === "200");
+		tcp_probe.destroy();
+		
+	})
+	tcp_probe.connect(port,addr);
 }
+
+
+//probe_rtsp_source('127.0.0.1',8554,'vlc', function(ans) {});
+
 
 app.use(express.static(path.join(__dirname, 'static')));
 init_sources();
