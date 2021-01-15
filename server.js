@@ -70,9 +70,8 @@ function getKurentoClient(callback) {
 
     kurento(KMS_URI, function(error, _kurentoClient) {
         if (error) {
-            console.log("Could not find media server at address " + KMS_URI);
-            return callback("Could not find media server at address" + KMS_URI
-                    + ". Exiting with error " + error);
+            log("KMS NOT FOUND AT " + KMS_URI);
+            return false;
         }
 
         kurentoClient = _kurentoClient;
@@ -81,7 +80,7 @@ function getKurentoClient(callback) {
 }
 
 function init_sources(){
-	console.log('[' + new Date().toISOString().substring(0,19) + '] INITIALIZING SOURCE LIST, ' + rtsp_sources.length + ' ITEMS');
+	log('INITIALIZING SOURCE LIST, ' + rtsp_sources.length + ' ITEMS');
 	rtsp_sources.forEach(source => {
 		listenRTSPsource(source);
 	});
@@ -89,55 +88,54 @@ function init_sources(){
 
 
 function openRTSPsource(source){
-	console.log('[' + new Date().toISOString().substring(0,19) + '] OPENING SOURCE ' + source.key + ' (' + source.uri + ')');
+	log('OPENING SOURCE ' + source.key + ' (' + source.uri + ')');
 	var rtsp_uri = source.uri;
 	var key = source.key;
 	var vod_addr = VOD_STORAGE + key + '/' + key.substring(0,12) + '-' + new Date().toISOString().substring(0,16); // ex: [...]/key-2021-12-5T15:14.mp4
 	return getKurentoClient(function(error, client) {
 		if (error) {
-			console.log(error);
+			log('ERROR: ' + error);
 			source.status = STATUS.FAILURE;
 			return;
 		}
 
 		client.create('MediaPipeline', function(error, pipeline) {
 			if (error) {
-				console.log(error);
+				log('ERROR: ' + error);;
 				source.status = STATUS.FAILURE;
 				return ;
 			}
 
 			pipeline.create('PlayerEndpoint', {networkCache: 0, uri : rtsp_uri}, function(error, player) {
 				if (error) {
-					console.log(error);
+					log('ERROR: ' + error);;
 					source.status = STATUS.FAILURE;
 					return;
 				}
 				pipeline.create('RecorderEndpoint', {uri: vod_addr, mediaProfile:VOD_PROFILE}, function(error, recorder) {
 					if (error) {
-						console.log(error);
+						log('ERROR: ' + error);;
 						source.status = STATUS.FAILURE;
 						return;
 					}
 
 					recorder.on('Error', function (a) { 
-						console.log('recorder error event');
-						console.log(a);
+						log('ERROR: ' + error);;
 						source.status = STATUS.FAILURE;
 						return;
 					});
 
 					player.on('EndOfStream', function (a) {
-						console.log('[' + new Date().toISOString().substring(0,19) + '] STREAM ' + source.key + ' ENDED AT SOURCE');
+						log('STREAM ' + source.key + ' ENDED AT SOURCE');
 						closeRTSPsource(source);
 						listenRTSPsource(source);
 						return;
 					})
 					player.connect(recorder);
-					recorder.record(error => { if(error) console.log("recorder error: ", error) });
+					recorder.record(error => { if(error) log('ERROR: ' + error); });
 					
 					player.play((err) => {
-						if(err) console.log(err);
+						if(err) log('ERROR: ' + err);
 					});
 
 					if(!source.socket){
@@ -162,7 +160,7 @@ function openRTSPsource(source){
 											}
 
 											if(!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
-											console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
+											log('CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
 											sock.send(JSON.stringify({
 												id : 'viewerResponse',
 												response : 'accepted',
@@ -171,7 +169,7 @@ function openRTSPsource(source){
 										});
 										break;
 									case 'stop':
-									console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
+									log('CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
 										clientEndpoints[sock._socket.remoteAddress].release();
 										delete clientEndpoints[sock._socket.remoteAddress]
 										break;
@@ -185,7 +183,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + source.port + '\\' + key);
+					log('SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + source.port + '\\' + key);
 					return true;
 				});
 
@@ -194,26 +192,27 @@ function openRTSPsource(source){
 	})
 }
 
+var pollFunc = {};
 function listenRTSPsource(source) {
 	probe_rtsp_source(source.addr, source.port, source.key, (ans) => {
 		if(ans){
 			openRTSPsource(source);
 		}
 		else{
-			var pollFunc = setInterval(() => {
+			pollFunc[source.addr] = setInterval(() => {
 				listenRTSPsource(source)
-				clearInterval(pollFunc);
+				clearInterval(pollFunc[source.addr]);
 			}, SOURCE_POLL_PERIOD_MS);
 			var prevStat = source.status;
 			source.status = STATUS.LISTENING;
-			if(prevStat !== source.status) console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status);
+			if(prevStat !== source.status) log('SOURCE ' + source.key + ' STATUS ' + source.status);
 		}
 	})
 	
 }
 
 function closeRTSPsource(source) {
-	console.log('[' + new Date().toISOString().substring(0,19) + '] CLOSING SOURCE ' + source.key + ' (' + source.uri + ')');
+	log('CLOSING SOURCE ' + source.key + ' (' + source.uri + ')');
 	if(source.recorder){
 		source.recorder.stop(error => {
 			if (error) {
@@ -233,7 +232,7 @@ function closeRTSPsource(source) {
 		source.pipeline = null;
 	}
 	if(source.status !== STATUS.FAILURE) source.status = STATUS.CLOSED;
-	console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status);
+	log('SOURCE ' + source.key + ' STATUS ' + source.status);
 }
 
 function startViewer(source, ws, sdpOffer, callback) {
@@ -306,6 +305,9 @@ var probe_rtsp_source = function(addr, port, key, callback){
 	tcp_probe.connect(port,addr);
 }
 
+var log = function(message){
+	console.log('[' + new Date().toISOString().substring(0,19) + '] ' + message);
+}
 
 //probe_rtsp_source('127.0.0.1',8554,'vlc', function(ans) {});
 
