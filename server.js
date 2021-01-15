@@ -12,8 +12,8 @@ var app = express();
  * Definition of global variables.
  */
 var kurentoClient = null;
-const SERVER_URI = 'http:/localhost:8080/';
-const SERVER_TEST_PORT = 8080;
+const HOSTNAME = 'localhost';
+const TEST_PORT = 8080;
 const KMS_URI = 'ws://localhost:8888/kurento';
 
 const STATUS = {
@@ -24,8 +24,8 @@ const STATUS = {
 }
 
 const SOURCE_POLL_PERIOD_MS = 10000;
-const MIN_OUTPUT_BANDWIDTH = 1000;
-const MAX_OUTPUT_BANDWIDTH = 1500;
+const MIN_OUTPUT_BANDWIDTH = 1500;
+const MAX_OUTPUT_BANDWIDTH = 3000;
 
 const VOD_STORAGE = 'file:///home/jmjm/Videos/kurentotests/';
 const VOD_PROFILE = 'MP4_VIDEO_ONLY';
@@ -54,7 +54,7 @@ var rtsp_sources = [
  * Server startup
  */
 
-var server = app.listen(SERVER_TEST_PORT, function() {
+var server = app.listen(TEST_PORT, function() {
 });
 
 
@@ -107,13 +107,12 @@ function openRTSPsource(source){
 				return ;
 			}
 
-			pipeline.create('PlayerEndpoint', {uri : rtsp_uri}, function(error, player) {
+			pipeline.create('PlayerEndpoint', {networkCache: 0, uri : rtsp_uri}, function(error, player) {
 				if (error) {
 					console.log(error);
 					source.status = STATUS.FAILURE;
 					return;
 				}
-
 				pipeline.create('RecorderEndpoint', {uri: vod_addr, mediaProfile:VOD_PROFILE}, function(error, recorder) {
 					if (error) {
 						console.log(error);
@@ -189,7 +188,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + SERVER_URI + '' + key);
+					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + source.port + '\\' + key);
 					return true;
 				});
 
