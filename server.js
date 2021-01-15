@@ -92,7 +92,7 @@ function openRTSPsource(source){
 	console.log('[' + new Date().toISOString().substring(0,19) + '] OPENING SOURCE ' + source.key + ' (' + source.uri + ')');
 	var rtsp_uri = source.uri;
 	var key = source.key;
-	var vod_addr = VOD_STORAGE + key.substring(0,12) + '-' + new Date().toISOString().substring(0,16); // ex: [...]/key-2021-12-5T15:14.mp4
+	var vod_addr = VOD_STORAGE + key + '/' + key.substring(0,12) + '-' + new Date().toISOString().substring(0,16); // ex: [...]/key-2021-12-5T15:14.mp4
 	return getKurentoClient(function(error, client) {
 		if (error) {
 			console.log(error);
@@ -169,9 +169,6 @@ function openRTSPsource(source){
 												sdpAnswer : sdpAnswer
 											}));
 										});
-										break;
-									case 'ice_candidate':
-								//		onIceCandidate(message.candidate);
 										break;
 									case 'stop':
 									console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
