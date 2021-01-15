@@ -251,7 +251,7 @@ function closeRTSPsource(source) {
 		source.pipeline.release();
 		source.pipeline = null;
 	}
-	source.status = STATUS.CLOSED;
+	if(source.status !== STATUS.FAILURE) source.status = STATUS.CLOSED;
 	console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status);
 }
 
