@@ -191,7 +191,9 @@ const STATUS = {
 	LISTENING: 'LISTENING'
 }
 
-const SOURCE_POLL_PERIOD_MS = 10000
+const SOURCE_POLL_PERIOD_MS = 10000;
+const MIN_OUTPUT_BANDWIDTH = 1000;
+const MAX_OUTPUT_BANDWIDTH = 1500;
 
 const VOD_STORAGE = 'file:///home/jmjm/Videos/kurentotests/';
 const VOD_PROFILE = 'MP4_VIDEO_ONLY';
@@ -203,6 +205,14 @@ var rtsp_sources = [
 		addr: 'localhost',
 		type: 'rtsp',
 		key: 'vlc',
+		status: STATUS.CLOSED
+	},
+	{
+		uri: 'rtsp://192.168.50.19:5554',
+		port: 5554,
+		addr: '192.168.50.19',
+		type: 'rtsp',
+		key: 'mobile',
 		status: STATUS.CLOSED
 	}
 ]
@@ -316,7 +326,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + argv.as_uri + '/' + key);
+					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + argv.as_uri + '' + key);
 					return true;
 				});
 
@@ -393,6 +403,8 @@ function startViewer(source, ws, sdpOffer, callback) {
             }));
         });
 
+		webRtcEndpoint.setMinVideoRecvBandwidth(MIN_OUTPUT_BANDWIDTH);
+      webRtcEndpoint.setMaxVideoRecvBandwidth(MAX_OUTPUT_BANDWIDTH);
 		webRtcEndpoint.processOffer(sdpOffer, function(error, sdpAnswer) {
 			if (error) {
 				stop();
