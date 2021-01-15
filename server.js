@@ -65,7 +65,6 @@ var app = express();
 var idCounter = 0;
 var candidatesQueue = [];
 var kurentoClient = null;
-var presenter = null;
 var viewer;
 
 /*
@@ -276,11 +275,12 @@ function openRTSPsource(source){
 						});
 
 						_sock.on('connection', function(sock) {
+							var clientEndpoints = {};
 							sock.on('message', function(_message) {
 								var message = JSON.parse(_message);
 								switch (message.id) {
 									case 'sdp_offer':
-										startViewer(source, sock, message.sdpOffer, function(error, sdpAnswer) {
+										startViewer(source, sock, message.sdpOffer, function(error, sdpAnswer, webRtcEndpoint) {
 											if (error) {
 												return sock.send(JSON.stringify({
 													id : 'viewerResponse',
@@ -288,7 +288,9 @@ function openRTSPsource(source){
 													message : error
 												}));
 											}
-							
+
+											if(!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
+											console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
 											sock.send(JSON.stringify({
 												id : 'viewerResponse',
 												response : 'accepted',
@@ -298,6 +300,11 @@ function openRTSPsource(source){
 										break;
 									case 'ice_candidate':
 										onIceCandidate(message.candidate);
+										break;
+									case 'stop':
+									console.log('[' + new Date().toISOString().substring(0,19) + '] CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
+										clientEndpoints[sock._socket.remoteAddress].release();
+										delete clientEndpoints[sock._socket.remoteAddress]
 										break;
 								}
 								
@@ -309,7 +316,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status);
+					console.log('[' + new Date().toISOString().substring(0,19) + '] SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ' + argv.as_uri + '/' + key);
 					return true;
 				});
 
@@ -396,7 +403,7 @@ function startViewer(source, ws, sdpOffer, callback) {
 					stop();
 					return callback(error);
 				}
-				callback(null, sdpAnswer);
+				callback(null, sdpAnswer, webRtcEndpoint);
 		        webRtcEndpoint.gatherCandidates(function(error) {
 		            if (error) {
 			            stop();

@@ -79,36 +79,6 @@ function viewerResponse(message) {
 	}
 }
 
-function presenter() {
-	/*if (!webRtcPeer) {
-		showSpinner(video);
-
-		var options = {
-			localVideo: video,
-			onicecandidate : onIceCandidate
-	    }
-
-		webRtcPeer = kurentoUtils.WebRtcPeer.WebRtcPeerSendonly(options, function(error) {
-			if(error) return onError(error);
-
-			this.generateOffer(onOfferPresenter);
-		});
-	}*/
-	var message = {
-		id : 'start'
-	};
-	sendMessage(message);
-}
-
-function onOfferPresenter(error, offerSdp) {
-    if (error) return onError(error);
-
-	var message = {
-		id : 'presenter',
-		sdpOffer : offerSdp
-	};
-	sendMessage(message);
-}
 
 function viewer() {
 	initsocket();
@@ -153,6 +123,7 @@ function stop() {
 				id : 'stop'
 		}
 		sendMessage(message);
+		dispose();
 	}
 
 function dispose() {
