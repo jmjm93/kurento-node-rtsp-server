@@ -3,7 +3,7 @@ var express = require('express');
 var ws = require('ws');
 var kurento = require('kurento-client');
 var net = require('net');
-
+var https = require('https');
 
 
 var app = express();
@@ -13,8 +13,10 @@ var app = express();
  */
 var kurentoClient = null;
 const HOSTNAME = 'localhost';
-const TEST_PORT = 8080;
+const WS_PORT = 8080;
 const KMS_URI = 'ws://localhost:8888/kurento';
+const IRIS_URI = 'irisdev.tk'
+
 
 const STATUS = {
 	FAILURE: 'FAILURE',
@@ -31,31 +33,40 @@ const VOD_STORAGE = 'file:///home/jmjm/Videos/kurentotests/';
 const VOD_PROFILE = 'MP4_VIDEO_ONLY';
 
 var rtsp_sources = [
-	{
+	/*{
 		uri: 'rtsp://localhost:8554/vlc',
 		port: 8554,
 		addr: 'localhost',
 		type: 'rtsp',
 		key: 'vlc',
 		status: STATUS.CLOSED
-	},
+	},*/
 	{
-		uri: 'rtsp://192.168.50.19:5554',
-		port: 5554,
+		uri: 'rtsp://192.168.50.19:8554',
+		port: 8554,
 		addr: '192.168.50.19',
 		type: 'rtsp',
 		key: 'mobile',
 		status: STATUS.CLOSED
 	}
+	/*{
+		uri: 'rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov',
+		port: 554,
+		addr: 'wowzaec2demo.streamlock.net',
+		type: 'rtsp',
+		key: 'wowza',
+		status: STATUS.CLOSED
+	},*/
+	/*{
+		uri: 'rtsp://20.50.114.197:6604/TVdXRlJTYXVkYXgzLDMsYXVkYXgzLDEsMSwwLDA=',
+		port: 6604,
+		addr: '20.50.114.197',
+		type: 'rtsp',
+		key: 'camtest',
+		status: STATUS.CLOSED
+	}*/
+	
 ];
-
-
-/*
- * Server startup
- */
-
-var server = app.listen(TEST_PORT, function() {
-});
 
 
 /*
@@ -150,28 +161,58 @@ function openRTSPsource(source){
 								var message = JSON.parse(_message);
 								switch (message.id) {
 									case 'sdp_offer':
-										startViewer(source, sock, message.sdpOffer, function(error, sdpAnswer, webRtcEndpoint) {
-											if (error) {
-												return sock.send(JSON.stringify({
-													id : 'viewerResponse',
-													response : 'rejected',
-													message : error
-												}));
-											}
-
-											if(!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
-											log('CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
+										if(!message.sdpOffer || !message.token){
 											sock.send(JSON.stringify({
 												id : 'viewerResponse',
-												response : 'accepted',
-												sdpAnswer : sdpAnswer
+												response : 'rejected',
+												error : 'missing fields'
 											}));
+										}
+										var qData = '{"elementId":null,"missionId":null,"DAO":null,"timestamp":null}';
+										var opt = {
+											host: IRIS_URI,
+											path: '/irisws/get/camera',
+											method: 'POST',
+											headers: {
+												'Authorization': message.token,
+											'Content-Type':'application/json'}
+										};
+										var req = https.request(opt, function (ans) {
+											console.log(ans.statusCode);
+											if(ans.statusCode !== 401){
+											
+												startViewer(source, sock, message.sdpOffer, function(error, sdpAnswer, webRtcEndpoint) {
+													if (error) {
+														return sock.send(JSON.stringify({
+															id : 'viewerResponse',
+															response : 'rejected',
+															message : error
+														}));
+													}
+													if(!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
+													log('CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
+													sock.send(JSON.stringify({
+														id : 'viewerResponse',
+														response : 'accepted',
+														sdpAnswer : sdpAnswer
+													}));
+												});
+											}
+											else{
+												sock.send(JSON.stringify({
+													id : 'viewerResponse',
+													response : 'rejected',
+													sdpAnswer : 'not auth'
+												}));
+											}
 										});
+										req.write(qData);
+										req.end();
 										break;
 									case 'stop':
 									log('CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
 										clientEndpoints[sock._socket.remoteAddress].release();
-										delete clientEndpoints[sock._socket.remoteAddress]
+										delete clientEndpoints[sock._socket.remoteAddress];
 										break;
 								}
 								
@@ -183,7 +224,7 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
-					log('SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + source.port + '\\' + key);
+					log('SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + WS_PORT + '\\' + key);
 					return true;
 				});
 
@@ -194,14 +235,14 @@ function openRTSPsource(source){
 
 var pollFunc = {};
 function listenRTSPsource(source) {
-	probe_rtsp_source(source.addr, source.port, source.key, (ans) => {
+	probe_rtsp_source(source, (ans) => {
+		clearInterval(pollFunc[source.addr]);
 		if(ans){
 			openRTSPsource(source);
 		}
 		else{
 			pollFunc[source.addr] = setInterval(() => {
 				listenRTSPsource(source)
-				clearInterval(pollFunc[source.addr]);
 			}, SOURCE_POLL_PERIOD_MS);
 			var prevStat = source.status;
 			source.status = STATUS.LISTENING;
@@ -281,28 +322,77 @@ function stop() {
 }
 
 // opens a tcp connection and sends an RTSP DESCRIBE request to see if the stream is available
-var probe_rtsp_source = function(addr, port, key, callback){
-	const addr_byte = Buffer.from('rtsp://' + addr + ':' + port + '/' + key, 'utf8').toString('hex');
-	var rtsp_desc_byte = "444553435249424520" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP DESCRIBE request field
-	//var rtsp_setup_byte = "534554555020" + addr_byte + "20525453502f312e300d0a0d0a"; // RTSP SETUP request field
+var probe_rtsp_source = function(source, callback){
+		//log('probing ' + source.key);
+	const addr_byte = Buffer.from(source.uri, 'utf8').toString('hex');
+	var rtsp_options_byte = "4f5054494f4e5320" + addr_byte + "20525453502f312e300d0a";
+
+	var rtsp_desc_byte = "444553435249424520" + addr_byte + "20525453502f312e300d0a"; // RTSP DESCRIBE request field
+	// add User-Agent: Gstreamer/1.8.1.1\r\n
+	rtsp_desc_byte += "557365722d4167656e743a204753747265616d65722f312e382e312e310d0a";
+	rtsp_options_byte += "557365722d4167656e743a204753747265616d65722f312e382e312e310d0a0d0a";
+	// add Accept: application/sdp\r\n	
+	rtsp_desc_byte += "4163636570743a206170706c69636174696f6e2f7364700d0a0d0a";
 	var rtsp_describe_raw_hex = Buffer.from(rtsp_desc_byte, 'hex');
-	//var rtsp_setup_raw_hex = Buffer.from(rtsp_setup_byte, 'hex');	
+	var rtsp_options_raw_hex = Buffer.from(rtsp_options_byte, 'hex');
 	var tcp_probe = new net.Socket();
-	tcp_probe.on('connect', () => 
-		tcp_probe.write(rtsp_describe_raw_hex));
+	var state = 0;
+	var sent = false;
+	tcp_probe.on('connect', () => {
+		tcp_probe.write(rtsp_options_raw_hex);
+	});
 		
 	tcp_probe.on('error', (err) => {
-		callback(false);
+		if(!sent){
+			//log(source.key + ' notok');
+			callback(false);
+			sent = true;
+		}
 		tcp_probe.destroy();
 	});
 	tcp_probe.on('data', (ans) => {
 		var ans_str = ans.toString();
 		var rtsp_code = ans_str.split('\n')[0].split(' ')[1];
-		callback(rtsp_code === "200");
-		tcp_probe.destroy();
+		if(rtsp_code[0] === "4" || rtsp_code[0] === "5"){
+			tcp_probe.destroy();
+			if(!sent){
+				//log(source.key + ' notok');
+				callback(false);
+				sent = true;
+				return;
+			}
+		}
+		if(!state){
+			tcp_probe.write(rtsp_describe_raw_hex);
+			state++;
+		}
+		else{
+			state++;
+			if(!sent){
+				//log(source.key + ' ok');
+				callback(true);
+				sent = true;
+				return;
+			}
+			tcp_probe.destroy();
+		} 
 		
 	})
-	tcp_probe.connect(port,addr);
+	tcp_probe.setTimeout(3000, () => {
+		tcp_probe.destroy();
+		callback(false);
+	})
+	tcp_probe.connect(source.port,source.addr);
+	var time = setTimeout(() => {
+		tcp_probe.destroy();
+		if(!sent){
+			//log(source.key + ' timeout');
+			callback(false);
+			sent = true;
+			return;
+		}
+		clearTimeout(time);
+	},3000);
 }
 
 var log = function(message){
@@ -312,5 +402,42 @@ var log = function(message){
 //probe_rtsp_source('127.0.0.1',8554,'vlc', function(ans) {});
 
 
+
 app.use(express.static(path.join(__dirname, 'static')));
+
+
+/*
+ * Server startup
+ */
+
+var server = app.listen(WS_PORT, function() {
+});
+
+
+//var credentials = {key: privateKey, cert: certificate};
+
+//var httpsServer = https.createServer(credentials, app);
 init_sources();
+
+//on exit handler
+/*
+process.stdin.resume();//so the program will not close instantly
+function exitHandler(options, exitCode) {
+	log('CLOSING ALL STREAMS ON EXIT SIGNAL');
+	rtsp_sources.forEach(source => {
+		closeRTSPsource(source);
+	})
+}
+
+//do something when app is closing
+process.on('exit', exitHandler.bind(null,{cleanup:true}));
+
+//catches ctrl+c event
+process.on('SIGINT', exitHandler.bind(null, {exit:true}));
+
+// catches "kill pid" (for example: nodemon restart)
+process.on('SIGUSR1', exitHandler.bind(null, {exit:true}));
+process.on('SIGUSR2', exitHandler.bind(null, {exit:true}));
+
+//catches uncaught exceptions
+process.on('uncaughtException', exitHandler.bind(null, {exit:true}));*/

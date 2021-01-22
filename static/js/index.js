@@ -100,9 +100,9 @@ function viewer() {
 
 function onOfferViewer(error, offerSdp) {
 	if (error) return onError(error)
-
 	var message = {
 		id : 'sdp_offer',
+		token : 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOiIxNjExMDg4NzYzIiwiaWF0IjoiMTYxMTA3MDc2MyIsImlzcyI6ImlyaXNkZXYudGsiLCJ1c2VybmFtZSI6IkFkbWluIn0=.XetP75dBWVQMZOkkvaG3vpuMqR1QY7xq4dXOU9nK9yE=',
 		sdpOffer : offerSdp
 	}
 	sendMessage(message);
