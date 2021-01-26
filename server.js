@@ -40,7 +40,7 @@ var rtsp_sources = [
 		type: 'rtsp',
 		key: 'vlc',
 		status: STATUS.CLOSED
-	},*/
+	},
 	{
 		uri: 'rtsp://192.168.50.19:8554',
 		port: 8554,
@@ -48,15 +48,15 @@ var rtsp_sources = [
 		type: 'rtsp',
 		key: 'mobile',
 		status: STATUS.CLOSED
-	}
-	/*{
+	}*/
+	{
 		uri: 'rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov',
 		port: 554,
 		addr: 'wowzaec2demo.streamlock.net',
 		type: 'rtsp',
 		key: 'wowza',
 		status: STATUS.CLOSED
-	},*/
+	}
 	/*{
 		uri: 'rtsp://20.50.114.197:6604/TVdXRlJTYXVkYXgzLDMsYXVkYXgzLDEsMSwwLDA=',
 		port: 6604,
@@ -103,6 +103,7 @@ function openRTSPsource(source){
 	var rtsp_uri = source.uri;
 	var key = source.key;
 	var vod_addr = VOD_STORAGE + key + '/' + key.substring(0,12) + '-' + new Date().toISOString().substring(0,16); // ex: [...]/key-2021-12-5T15:14.mp4
+	source.last_vod_addr = vod_addr;
 	return getKurentoClient(function(error, client) {
 		if (error) {
 			log('ERROR: ' + error);
@@ -161,53 +162,29 @@ function openRTSPsource(source){
 								var message = JSON.parse(_message);
 								switch (message.id) {
 									case 'sdp_offer':
-										if(!message.sdpOffer || !message.token){
+										if (!message.sdpOffer) {
 											sock.send(JSON.stringify({
-												id : 'viewerResponse',
-												response : 'rejected',
-												error : 'missing fields'
+												id: 'viewerResponse',
+												response: 'rejected',
+												error: 'missing fields'
 											}));
 										}
-										var qData = '{"elementId":null,"missionId":null,"DAO":null,"timestamp":null}';
-										var opt = {
-											host: IRIS_URI,
-											path: '/irisws/get/camera',
-											method: 'POST',
-											headers: {
-												'Authorization': message.token,
-											'Content-Type':'application/json'}
-										};
-										var req = https.request(opt, function (ans) {
-											console.log(ans.statusCode);
-											if(ans.statusCode !== 401){
-											
-												startViewer(source, sock, message.sdpOffer, function(error, sdpAnswer, webRtcEndpoint) {
-													if (error) {
-														return sock.send(JSON.stringify({
-															id : 'viewerResponse',
-															response : 'rejected',
-															message : error
-														}));
-													}
-													if(!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
-													log('CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
-													sock.send(JSON.stringify({
-														id : 'viewerResponse',
-														response : 'accepted',
-														sdpAnswer : sdpAnswer
-													}));
-												});
-											}
-											else{
-												sock.send(JSON.stringify({
-													id : 'viewerResponse',
-													response : 'rejected',
-													sdpAnswer : 'not auth'
+										startViewer(source, sock, message.sdpOffer, function (error, sdpAnswer, webRtcEndpoint) {
+											if (error) {
+												return sock.send(JSON.stringify({
+													id: 'viewerResponse',
+													response: 'rejected',
+													message: error
 												}));
 											}
+											if (!clientEndpoints[sock._socket.remoteAddress]) clientEndpoints[sock._socket.remoteAddress] = webRtcEndpoint;
+											log('CLIENT ' + sock._socket.remoteAddress + ' CONSUMING STREAM ' + source.key);
+											sock.send(JSON.stringify({
+												id: 'viewerResponse',
+												response: 'accepted',
+												sdpAnswer: sdpAnswer
+											}));
 										});
-										req.write(qData);
-										req.end();
 										break;
 									case 'stop':
 									log('CLIENT ' + sock._socket.remoteAddress + ' CLOSING STREAM ' + source.key);
@@ -224,6 +201,13 @@ function openRTSPsource(source){
 					source.recorder = recorder;
 					source.player = player;
 					source.status = STATUS.STREAMING;
+					source.vod_check_interval = setInterval(() => {
+						console.log('checking vod size of ' + source.key);
+						if(!check_vod_size(source)){
+							closeRTSPsource(source);
+							listenRTSPsource(source);
+						}
+					},SOURCE_POLL_PERIOD_MS);
 					log('SOURCE ' + source.key + ' STATUS ' + source.status + ' AT ws:\\\\' + HOSTNAME + ':' + WS_PORT + '\\' + key);
 					return true;
 				});
@@ -395,11 +379,26 @@ var probe_rtsp_source = function(source, callback){
 	},3000);
 }
 
+
+// checks if there's a file being actually recorded, in case the file is empty the connection might be broken so it attempts to reconnect
+var check_vod_size = function(source){
+	if(!source.last_vod_addr) return 0;
+	var stats = fs.statSync(source.last_vod_addr.substr(7,100));
+	var bytes = stats.size;
+	console.log(bytes);
+	return bytes;
+}
+
+
 var log = function(message){
 	console.log('[' + new Date().toISOString().substring(0,19) + '] ' + message);
 }
 
-//probe_rtsp_source('127.0.0.1',8554,'vlc', function(ans) {});
+var log = function(message){
+	console.log('[' + new Date().toISOString().substring(0,19) + '] ' + message);
+}
+
+
 
 
 
